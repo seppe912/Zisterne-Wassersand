@@ -62,8 +62,8 @@ class SleepInterruptException(Exception):
 def on_connect(client, userdata, flags, rc):
     if rc == 0:
         _LOGGER.info("MQTT: Verbindung akzeptiert")
-        publish = client.publish('zisterne/connection/status','connected',qos=2, retain=True)
-        _LOGGER.debug("Publishing: MsgNum:%s: 'zisterne/connection/status','connected'" % (publish[1]))
+        publish = client.publish('Zisterne/connection/status','connected',qos=2, retain=True)
+        _LOGGER.debug("Publishing: MsgNum:%s: 'Zisterne/connection/status','connected'" % (publish[1]))
     elif rc == 1:
         _LOGGER.error("MQTT: Falsche Protokollversion")
     elif rc == 2:
@@ -78,8 +78,8 @@ def on_connect(client, userdata, flags, rc):
         _LOGGER.error("MQTT: Ungültiger Returncode")
 
 def on_disconnect(client, userdata, flags, rc):
-    publish = client.publish('zisterne/connection/status','disconnected',qos=2, retain=True)
-    _LOGGER.debug("Publishing: MsgNum:%s: 'zisterne/connection/status','disconnected'" % (publish[1]))
+    publish = client.publish('Zisterne/connection/status','disconnected',qos=2, retain=True)
+    _LOGGER.debug("Publishing: MsgNum:%s: 'Zisterne/connection/status','disconnected'" % (publish[1]))
 
 try: # check if MQTTgateway is installed or not and set MQTT Client settings
     with open(home_path + '/config/system/general.json') as jsonFile:
@@ -94,7 +94,7 @@ try: # check if MQTTgateway is installed or not and set MQTT Client settings
     client.username_pw_set(MQTTuser, MQTTpass)
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
-    client.will_set('zisterne/connection/status','disconnected',qos=2, retain=True)
+    client.will_set('Zisterne/connection/status','disconnected',qos=2, retain=True)
     _LOGGER.info('found MQTT Gateway Plugin - publish over MQTT')
     client.connect(MQTThost, int(MQTTport))
     client.loop_start()
