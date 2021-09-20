@@ -121,9 +121,8 @@ def distanz():
     GPIO.output(GPIO_TRIGGER, True)
  
     # setze Trigger nach 0.01ms auf LOW
-    time.sleep(0.00001)
+    time.sleep(0.01)
     GPIO.output(GPIO_TRIGGER, False)
- 
     StartZeit = time.time()
     StopZeit = time.time()
  
@@ -141,8 +140,8 @@ def distanz():
     # und durch 2 teilen, da hin und zurueck
     
     distanz = (TimeElapsed * 34300) / 2
-    #distanz = TimeElapsed / 58.2
- 
+
+    time.sleep(0.001)
     return distanz
  
 if __name__ == '__main__':
@@ -151,7 +150,6 @@ if __name__ == '__main__':
         killer = GracefulKiller()
         while not killer.kill_now:
             abstand = distanz()
-            time.sleep(0.001)
             print ("Gemessene Entfernung = %.1f cm" % abstand)
             if MQTT == 1:
                 publish = client.publish('Zisterne/Wasserstand', round(abstand,1), qos=2, retain=True)
