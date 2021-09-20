@@ -120,7 +120,7 @@ def distanz():
     # setze Trigger auf HIGH
     GPIO.output(GPIO_TRIGGER, True)
  
-    # setze Trigger nach 0.01ms auf LOW
+    # setze Trigger nach 10ms auf LOW
     time.sleep(0.01)
     GPIO.output(GPIO_TRIGGER, False)
     StartZeit = time.time()
