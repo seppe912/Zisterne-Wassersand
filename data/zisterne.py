@@ -141,7 +141,6 @@ def distanz():
     
     distanz = (TimeElapsed * 34300) / 2
 
-    time.sleep(0.001)
     return distanz
  
 if __name__ == '__main__':
