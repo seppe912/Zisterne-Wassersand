@@ -21,6 +21,7 @@ try:
     Miniserver = cfg.get('default','MINISERVER')
     Trigger_GPIO = int(cfg.get('default','TRIGGER'))
     Echo_GPIO = int(cfg.get('default','ECHO'))
+    global Abfrage
     Abfrage = int(cfg.get('default','ABFRAGE'))
 except:
     sys.exit('wrong configuration, please set GPIO Ports')
@@ -63,7 +64,7 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         _LOGGER.info("MQTT: Verbindung akzeptiert")
         publish = client.publish('Zisterne/connection/status','connected',qos=2, retain=True)
-        _LOGGER.debug("Publishing: MsgNum:%s: 'Zisterne/connection/status','connected'" % (publish[1]))
+        _LOGGER.debug("Publishing: MsgNum:%s: 'zisterne/connection/status','connected'" % (publish[1]))
     elif rc == 1:
         _LOGGER.error("MQTT: Falsche Protokollversion")
     elif rc == 2:
@@ -79,7 +80,7 @@ def on_connect(client, userdata, flags, rc):
 
 def on_disconnect(client, userdata, flags, rc):
     publish = client.publish('Zisterne/connection/status','disconnected',qos=2, retain=True)
-    _LOGGER.debug("Publishing: MsgNum:%s: 'Zisterne/connection/status','disconnected'" % (publish[1]))
+    _LOGGER.debug("Publishing: MsgNum:%s: 'zisterne/connection/status','disconnected'" % (publish[1]))
 
 try: # check if MQTTgateway is installed or not and set MQTT Client settings
     with open(home_path + '/config/system/general.json') as jsonFile:
@@ -115,53 +116,86 @@ GPIO_ECHO = Echo_GPIO
 GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
 GPIO.setup(GPIO_ECHO, GPIO.IN)
 
+abstand = []
+
 def distanz():
-
-    # setze Trigger auf HIGH
-    GPIO.output(GPIO_TRIGGER, True)
- 
-    # setze Trigger nach 10ms auf LOW
-    time.sleep(0.01)
-    GPIO.output(GPIO_TRIGGER, False)
-    StartZeit = time.time()
-    StopZeit = time.time()
- 
-    # speichere Startzeit
-    while GPIO.input(GPIO_ECHO) == 0:
+    count = 0
+    abstand_list = []
+    while count <= 100:
+        # setze Trigger auf LOW --> Rauschunterdrückung
+        GPIO.output(GPIO_TRIGGER, False)
+        time.sleep(0.01)
+        
+        # setze Trigger auf HIGH
+        GPIO.output(GPIO_TRIGGER, True)
+     
+        # setze Trigger nach 10ms auf LOW
+        time.sleep(0.01)
+        GPIO.output(GPIO_TRIGGER, False)
         StartZeit = time.time()
- 
-    # speichere Ankunftszeit
-    while GPIO.input(GPIO_ECHO) == 1:
         StopZeit = time.time()
- 
-    # Zeit Differenz zwischen Start und Ankunft
-    TimeElapsed = StopZeit - StartZeit
-    # mit der Schallgeschwindigkeit (34300 cm/s) multiplizieren
-    # und durch 2 teilen, da hin und zurueck
-    
-    distanz = (TimeElapsed * 34300) / 2
+     
+        # speichere Startzeit
+        while GPIO.input(GPIO_ECHO) == 0:
+            StartZeit = time.time()
+     
+        # speichere Ankunftszeit
+        while GPIO.input(GPIO_ECHO) == 1:
+            StopZeit = time.time()
+     
+        # Zeit Differenz zwischen Start und Ankunft
+        TimeElapsed = StopZeit - StartZeit
+        # mit der Schallgeschwindigkeit (34300 cm/s) multiplizieren
+        # und durch 2 teilen, da hin und zurueck
+        
+        distanz = (TimeElapsed * 34300) / 2
+        abstand_list.insert(0,round(distanz,1))
+        count += 1
 
-    return distanz
+    abstand.insert(0,sorted(abstand_list)[int(len(abstand_list)/2)]) #Median aus n Messungen
+        
+    _LOGGER.debug("Gemessene Entfernung = %.1f cm" % abstand[0])
+    if MQTT == 1:
+        publish = client.publish('Zisterne/Wasserstand', abstand[0], qos=2, retain=True)
+        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserstand,%s" % (publish[1],abstand[0]))
+    else:
+        HTTPrequest = ("http://%s:%s@%s:%s/dev/sps/io/Zisterne_Wasserstand/%s" % (LoxUser, LoxPassword, LoxIP, LoxPort, abstand[0]))
+        r = requests.get(HTTPrequest)
+        if r.status_code != 200:
+            _LOGGER.error("Error {} on set Loxone Input Midea_{}_online, please Check User PW and IP from Miniserver in Loxberry config and the Names of Loxone Inputs.".format(r.status_code, device.id))
+    _LOGGER.debug('Anzahl Messungen in der Liste: %s' % len(abstand))
+        
+    return abstand
  
 if __name__ == '__main__':
     try:
         _LOGGER.info('starte loop...')
+        
         killer = GracefulKiller()
         while not killer.kill_now:
             abstand = distanz()
-            print ("Gemessene Entfernung = %.1f cm" % abstand)
-            if MQTT == 1:
-                publish = client.publish('Zisterne/Wasserstand', round(abstand,1), qos=2, retain=True)
-                _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserstand,%s" % (publish[1],round(abstand,1)))
-            else:
-                HTTPrequest = ("http://%s:%s@%s:%s/dev/sps/io/Zisterne_Wasserstand/%s" % (LoxUser, LoxPassword, LoxIP, LoxPort, abstand))
-                r = requests.get(HTTPrequest)
-                if r.status_code != 200:
-                    _LOGGER.error("Error {} on set Loxone Input Midea_{}_online, please Check User PW and IP from Miniserver in Loxberry config and the Names of Loxone Inputs.".format(r.status_code, device.id))
+
             try: # sleep abbrechen wenn killsignal kommt
-                time.sleep(Abfrage)
+                if max(abstand) - min(abstand) >0.5:
+                    _LOGGER.info('Wasserstandsänderung erkannt, erhöhe Abfragefrequenz auf 5 Sekunden')
+                    publish = client.publish('Zisterne/Wasserentnahme', 1, qos=2, retain=True)
+                    _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,1" % (publish[1]))
+                    while max(abstand) - min(abstand) >0.5:
+                        _LOGGER.debug(max(abstand) - min(abstand))
+                        time.sleep(5)                    
+                        while len(abstand) >= 60:
+                            abstand.pop()
+                        abstand = distanz()
+                    else:
+                        _LOGGER.info('Abfragefrequenz auf %s Sekunden zurückgesetzt' % Abfrage)
+                        publish = client.publish('Zisterne/Wasserentnahme', 0, qos=2, retain=True)
+                        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0" % (publish[1]))
+                else:
+                    time.sleep(Abfrage)
+                    while len(abstand) >= 5:
+                        abstand.pop()
             except SleepInterruptException:
-                _LOGGER.info('cancel sleep')
+                _LOGGER.info('wakeup from sleep, stopping process..')
                 pass
         GPIO.cleanup()
         _LOGGER.info('... stopped')
