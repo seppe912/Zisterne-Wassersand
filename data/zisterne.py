@@ -196,7 +196,7 @@ if __name__ == '__main__':
                         abstand.pop()
             except SleepInterruptException:
                 _LOGGER.info('wakeup from sleep, stopping process..')
-                pass
+                
         GPIO.cleanup()
         _LOGGER.info('... stopped')
     except:
