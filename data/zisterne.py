@@ -187,7 +187,7 @@ if __name__ == '__main__':
                             time.sleep(5) 
                         else:
                             time.sleep(Abfrage)
-                        while len(abstand) >= 180/Abfrage:
+                        while len(abstand) >= 180/Abfrage: #Überwachter Zeitraum 3 Minuten
                             abstand.pop()
                         abstand = distanz()
                     else:
@@ -196,7 +196,7 @@ if __name__ == '__main__':
                         _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0" % (publish[1]))
                 else:
                     time.sleep(Abfrage)
-                    while len(abstand) >= 180/Abfrage and len(abstand) >= 5:
+                    while len(abstand) >= 180/Abfrage and len(abstand) >= 5: #Überwachter Zeitraum 3 Minuten, aber mindestens 5 Abfrageabstände
                         abstand.pop()
             except SleepInterruptException:
                 _LOGGER.info('wakeup from sleep, stopping process..')
