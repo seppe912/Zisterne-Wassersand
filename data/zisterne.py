@@ -177,13 +177,17 @@ if __name__ == '__main__':
 
             try: # sleep abbrechen wenn killsignal kommt
                 if max(abstand) - min(abstand) >0.5:
-                    _LOGGER.info('Wasserstandsänderung erkannt, erhöhe Abfragefrequenz auf 5 Sekunden')
+                    _LOGGER.info('Wasserstandsänderung erkannt')
                     publish = client.publish('Zisterne/Wasserentnahme', 1, qos=2, retain=True)
                     _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,1" % (publish[1]))
                     while max(abstand) - min(abstand) >0.5:
                         _LOGGER.debug(max(abstand) - min(abstand))
-                        time.sleep(5)                    
-                        while len(abstand) >= 60:
+                        if Abfrage > 5:
+                            _LOGGER.info('Erhöhe Abfragefrequenz auf 5 Sekunden')
+                            time.sleep(5) 
+                        else:
+                            time.sleep(Abfrage)
+                        while len(abstand) >= 180/Abfrage:
                             abstand.pop()
                         abstand = distanz()
                     else:
@@ -192,11 +196,11 @@ if __name__ == '__main__':
                         _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0" % (publish[1]))
                 else:
                     time.sleep(Abfrage)
-                    while len(abstand) >= 5:
+                    while len(abstand) >= 180/Abfrage:
                         abstand.pop()
             except SleepInterruptException:
                 _LOGGER.info('wakeup from sleep, stopping process..')
-                
+
         GPIO.cleanup()
         _LOGGER.info('... stopped')
     except:
