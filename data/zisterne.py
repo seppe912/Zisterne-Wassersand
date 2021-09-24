@@ -196,7 +196,7 @@ if __name__ == '__main__':
                         _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0" % (publish[1]))
                 else:
                     time.sleep(Abfrage)
-                    while len(abstand) >= 180/Abfrage and 180/Abfrage >= 5:
+                    while len(abstand) >= 180/Abfrage and len(abstand) >= 5:
                         abstand.pop()
             except SleepInterruptException:
                 _LOGGER.info('wakeup from sleep, stopping process..')
