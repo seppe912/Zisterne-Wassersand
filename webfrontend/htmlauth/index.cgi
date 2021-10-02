@@ -34,6 +34,7 @@ our $savedata;
 our $echo;
 our $trigger;
 our $abfrage;
+our $max_abstand;
 
 # Read Settings
 $cfg             = new Config::Simple("$lbsconfigdir/general.cfg");
@@ -56,10 +57,10 @@ foreach (split(/&/,$ENV{"QUERY_STRING"}))
 # Set parameters coming in - GET over POST
 if ( !$query{'miniserver'} ) { if ( param('miniserver') ) { $miniserver = quotemeta(param('miniserver')); } else { $miniserver = $miniserver;  } } else { $miniserver = quotemeta($query{'miniserver'}); }
 if ( !$query{'debug'} ) { if ( param('debug') ) { $debug = quotemeta(param('debug')); } else { $debug = "0";  } } else { $debug = quotemeta($query{'debug'}); }
-if ( !$query{'echo'} ) { if ( param('echo') ) { $echo = quotemeta(param('echo')); } else { $echo = "0";  } } else { $echo = quotemeta($query{'echo'}); }
-if ( !$query{'trigger'} ) { if ( param('trigger') ) { $trigger = quotemeta(param('trigger')); } else { $trigger = "0";  } } else { $trigger = quotemeta($query{'trigger'}); }
-if ( !$query{'abfrage'} ) { if ( param('abfrage') ) { $abfrage = quotemeta(param('abfrage')); } else { $abfrage = "0";  } } else { $abfrage = quotemeta($query{'abfrage'}); }
-
+if ( !$query{'echo'} ) { if ( param('echo') ) { $echo = quotemeta(param('echo')); } else { $echo = $echo;  } } else { $echo = quotemeta($query{'echo'}); }
+if ( !$query{'trigger'} ) { if ( param('trigger') ) { $trigger = quotemeta(param('trigger')); } else { $trigger = $trigger;  } } else { $trigger = quotemeta($query{'trigger'}); }
+if ( !$query{'abfrage'} ) { if ( param('abfrage') ) { $abfrage = quotemeta(param('abfrage')); } else { $abfrage = "60";  } } else { $abfrage = quotemeta($query{'abfrage'}); }
+if ( !$query{'max_abstand'} ) { if ( param('max_abstand') ) { $max_abstand = quotemeta(param('max_abstand')); } else { $max_abstand = "500";  } } else { $max_abstand = quotemeta($query{'max_abstand'}); }
 
 # Figure out in which subfolder we are installed
 $psubfolder = abs_path($0);
@@ -74,6 +75,7 @@ if (param('savedata')) {
     $conf->param('ECHO', unquotemeta($echo));	
     $conf->param('TRIGGER', unquotemeta($trigger));	
     $conf->param('ABFRAGE', unquotemeta($abfrage));	
+    $conf->param('MAX_ABSTAND', unquotemeta($max_abstand));	
     
 	$conf->save();
 	system ("$installfolder/system/daemons/plugins/$psubfolder restart");
@@ -86,6 +88,7 @@ $debug = encode_entities($conf->param('DEBUG'));
 $echo = encode_entities($conf->param('ECHO'));
 $trigger = encode_entities($conf->param('TRIGGER'));
 $abfrage = encode_entities($conf->param('ABFRAGE'));
+$max_abstand = encode_entities($conf->param('MAX_ABSTAND'));
 
 # Set Enabled / Disabled switch
 #
