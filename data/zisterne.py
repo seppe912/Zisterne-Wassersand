@@ -16,32 +16,34 @@ home_path = 'REPLACELBHOMEDIR' #### REPLACE LBHOMEDIR ####
 # Miniserver Daten Laden
 cfg = configparser.RawConfigParser()
 cfg.read(cfg_path + '/zisterne.cfg')
-try:
-    DEBUG = cfg.get('default','DEBUG')
-    Miniserver = cfg.get('default','MINISERVER')
-    Trigger_GPIO = int(cfg.get('default','TRIGGER'))
-    Echo_GPIO = int(cfg.get('default','ECHO'))
-    global Abfrage
-    Abfrage = int(cfg.get('default','ABFRAGE'))
-except:
-    sys.exit('wrong configuration, please set GPIO Ports')
-    
+DEBUG = cfg.get('default','DEBUG')
+
+#LOGGING
 _LOGGER = logging.getLogger("zisterne.py")
 if DEBUG == "1":
    logging.basicConfig(level=logging.DEBUG, filename= log_path + '/zisterne-Wasserstand.log', format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m %H:%M:%S')
-   print("Debug is True")
    _LOGGER.debug("Debug is True")
 else:
    logging.basicConfig(level=logging.INFO, filename= log_path + '/zisterne-Wasserstand.log', format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s', datefmt='%d.%m %H:%M:%S')
 
-
-# Credentials to set Loxone Inputs over HTTP
-cfg.read(home_path + '/config/system/general.cfg')
-LoxIP = cfg.get(Miniserver,'IPADDRESS')
-LoxPort = cfg.get(Miniserver,'PORT')
-LoxPassword = cfg.get(Miniserver,'PASS')
-LoxUser = cfg.get(Miniserver,'ADMIN')
-
+# Konfiguration einlesen
+try:
+    Miniserver = cfg.get('default','MINISERVER')
+    GPIO_TRIGGER = int(cfg.get('default','TRIGGER'))
+    GPIO_ECHO = int(cfg.get('default','ECHO'))
+    abfrage = int(cfg.get('default','abfrage'))
+    max_abstand = int(cfg.get('default','max_abstand'))
+    
+    # Credentials to set Loxone Inputs over HTTP
+    cfg.read(home_path + '/config/system/general.cfg')
+    LoxIP = cfg.get(Miniserver,'IPADDRESS')
+    LoxPort = cfg.get(Miniserver,'PORT')
+    LoxPassword = cfg.get(Miniserver,'PASS')
+    LoxUser = cfg.get(Miniserver,'ADMIN')
+except:
+    _LOGGER.error(traceback.format_exc())
+    _LOGGER.error('Kann nicht starten, bitte erst alle Konfigurationsoptionen setzen')
+    sys.exit()
 
 
 class GracefulKiller:
@@ -104,106 +106,182 @@ except:
     _LOGGER.debug('cant find MQTT Gateway use HTTP requests to set Loxone inputs')
     MQTT = 0
 
-
-#GPIO Modus (BOARD / BCM)
-GPIO.setmode(GPIO.BCM)
- 
-#GPIO Pins zuweisen
-GPIO_TRIGGER = Trigger_GPIO
-GPIO_ECHO = Echo_GPIO
- 
-#Richtung der GPIO-Pins festlegen (IN / OUT)
-GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
-GPIO.setup(GPIO_ECHO, GPIO.IN)
-
-abstand = []
-
-def distanz():
-    count = 0
-    abstand_list = []
-    while count <= 100:
-        # setze Trigger auf LOW --> Rauschunterdrückung
-        GPIO.output(GPIO_TRIGGER, False)
-        time.sleep(0.01)
-        
-        # setze Trigger auf HIGH
-        GPIO.output(GPIO_TRIGGER, True)
+def init(GPIO_TRIGGER, GPIO_ECHO):
+    #GPIO Modus (BOARD / BCM)
+    GPIO.setmode(GPIO.BCM)
      
-        # setze Trigger nach 10ms auf LOW
-        time.sleep(0.01)
-        GPIO.output(GPIO_TRIGGER, False)
-        StartZeit = time.time()
-        StopZeit = time.time()
-     
-        # speichere Startzeit
-        while GPIO.input(GPIO_ECHO) == 0:
-            StartZeit = time.time()
-     
-        # speichere Ankunftszeit
-        while GPIO.input(GPIO_ECHO) == 1:
-            StopZeit = time.time()
-     
-        # Zeit Differenz zwischen Start und Ankunft
-        TimeElapsed = StopZeit - StartZeit
-        # mit der Schallgeschwindigkeit (34300 cm/s) multiplizieren
-        # und durch 2 teilen, da hin und zurueck
-        
-        distanz = (TimeElapsed * 34300) / 2
-        abstand_list.insert(0,round(distanz,1))
-        count += 1
+    #Richtung der GPIO-Pins festlegen (IN / OUT)
+    GPIO.setup(GPIO_TRIGGER, GPIO.OUT)
+    GPIO.setup(GPIO_ECHO, GPIO.IN)
+    
+    GPIO.output(GPIO_TRIGGER, False)
+    time.sleep(0.06)
 
-    abstand.insert(0,sorted(abstand_list)[int(len(abstand_list)/2)]) #Median aus n Messungen
-        
-    _LOGGER.debug("Gemessene Entfernung = %.1f cm" % abstand[0])
+def send_to_loxone(abstand):
     if MQTT == 1:
         publish = client.publish('Zisterne/Wasserstand', abstand[0], qos=2, retain=True)
-        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserstand,%s" % (publish[1],abstand[0]))
+        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserstand,%s'" % (publish[1],abstand[0]))
     else:
         HTTPrequest = ("http://%s:%s@%s:%s/dev/sps/io/Zisterne_Wasserstand/%s" % (LoxUser, LoxPassword, LoxIP, LoxPort, abstand[0]))
         r = requests.get(HTTPrequest)
         if r.status_code != 200:
-            _LOGGER.error("Error {} on set Loxone Input Midea_{}_online, please Check User PW and IP from Miniserver in Loxberry config and the Names of Loxone Inputs.".format(r.status_code, device.id))
-    _LOGGER.debug('Anzahl Messungen in der Liste: %s' % len(abstand))
+            _LOGGER.error("Error {} on set Loxone Zisterne_Wasserstand, please Check User PW and IP from Miniserver in Loxberry config and the Names of Loxone Inputs.".format(r.status_code, device.id))
+
+def distanz():
+    count = 0
+    n = 0
+    fehlmessungen = 0
+    messungen = 20 # Messergebnisse übrig nach korrektur zur Bildung vom Median
+    korrektur = 10 # alle 20+n Messungen n größte und n kleinste Messwerte aus der Liste entfernen
+    abstand_list = []
         
-    return abstand
+    while count < messungen + int(messungen/20)*2*korrektur:
+        try:
+            triggertimer = time.time()
+            # setze Trigger auf HIGH
+            GPIO.output(GPIO_TRIGGER, True)
+            
+            # setze Trigger nach 10ms auf LOW
+            time.sleep(0.015)
+            GPIO.output(GPIO_TRIGGER, False)
+
+            # speichere Startzeit
+            echo_low_time = time.time()
+            while GPIO.input(GPIO_ECHO) == 0:
+                StartZeit = time.time()
+                if StartZeit - echo_low_time >= 0.001:
+                    _LOGGER.error('Low Signal ist mit %.7f Sekunden zu lange, starte neue Messung' % (StartZeit - echo_low_time))
+                    break
+
+            # speichere Ankunftszeit
+            echo_high_time = time.time()
+            while GPIO.input(GPIO_ECHO) == 1:
+                StopZeit = time.time()
+                if StopZeit - echo_high_time >= 0.03: #0.03 = 5,145m
+                    LOGGER.error('High Signal ist mit %.4f Sekunden zu lange, starte neue Messung' % (StopZeit - echo_high_time))
+                    break
+
+            if StartZeit - echo_low_time >= 0.001 or StopZeit - echo_high_time >= 0.03:
+                fehlmessungen += 1
+                _LOGGER.error('Fehlmessungen: %s, continue' % fehlmessungen)
+                if fehlmessungen > 10:
+                    time.sleep(1)
+                continue
+                
+            # Zeit Differenz zwischen Start und Ankunft
+            TimeElapsed = round((StopZeit - StartZeit),7)
+            
+            # mit der Schallgeschwindigkeit (34300 cm/s) multiplizieren
+            # und durch 2 teilen, da hin und zurueck
+            distanz = (TimeElapsed * 34300) / 2
+            
+            if distanz > max_abstand:
+                fehlmessungen += 1
+                _LOGGER.error('Messwert mit %.1fcm zu hoch. Messe erneut' % distanz)
+                if fehlmessungen > 10:
+                    time.sleep(1)
+                continue
+                
+            abstand_list.insert(0,round(distanz,1))
+            count += 1
+
+            #aussortieren der größten und kleinsten Werte
+            if count in range(20 + 2*korrektur, messungen + 1 + int(messungen/20)*2*korrektur, 20 + 2*korrektur):
+                for i in range(korrektur):
+                    abstand_list.remove(min(abstand_list[0:20 + 2*korrektur-i-n]))
+                    abstand_list.remove(max(abstand_list[0:20 + 2*korrektur-1-i-n]))
+                    if n == korrektur-1:
+                        n = 0
+                    else:
+                        n += 1
+
+                _LOGGER.debug('min:%s Max:%s Median:%s Range:%.1f Anzahl:%s count: %s Fehlmessungen: %s' % (min(abstand_list[0:20]),max(abstand_list[0:20]), round(statistics.median(abstand_list[0:20]),1),max(abstand_list[0:20]) - min(abstand_list[0:20]), len(abstand_list),count, fehlmessungen))
+                _LOGGER.debug(sorted(abstand_list[0:20]))
+                
+        except Exception as error:
+            fehlmessungen += 1
+            _LOGGER.error(traceback.format_exc())
+            _LOGGER.warn('Messungsliste: %s , Anzahl der Messungen: %s, count: %s Fehlmessungen: %s' % (sorted(abstand_list),len(abstand_list),count, fehlmessungen))
+            # if fehlmessungen < messungen:
+                # _LOGGER.error('error:%s, starte Messung neu. Fehlmessungen: %s' % (error,fehlmessungen))
+                # time.sleep(1)
+                # continue
+            # else:
+                # raise Exception('zuviele Fehlmessungen, beende Script. Bitte auf Fehlersuche begeben')
+            continue
+
+    # if fehlmessungen < messungen:
+        # abstand.insert(0,statistics.median(abstand_list)) #Median aus n Messungen
+        # return abstand
+    # else:
+        # raise Exception('zuviele Fehlmessungen, beende Script. Bitte auf Fehlersuche begeben')
+    abstand.insert(0,round(statistics.median(abstand_list),1)) #Median aus n Messungen
+    change = round((max(abstand) - min(abstand)),1)
+    return abstand, change
  
+ 
+            
+######## Scriptstart #####
 if __name__ == '__main__':
     try:
-        _LOGGER.info('starte loop...')
-        
+        _LOGGER.info('Starte Abfrageschleife...')
+        # timestamp = time.time()
         killer = GracefulKiller()
+        init(GPIO_TRIGGER, GPIO_ECHO)
+        abstand = []
         while not killer.kill_now:
-            abstand = distanz()
-
-            try: # sleep abbrechen wenn killsignal kommt
-                if max(abstand) - min(abstand) >0.5:
-                    _LOGGER.info('Wasserstandsänderung erkannt')
-                    publish = client.publish('Zisterne/Wasserentnahme', 1, qos=2, retain=True)
-                    _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,1" % (publish[1]))
-                    while max(abstand) - min(abstand) >0.5:
-                        _LOGGER.debug(max(abstand) - min(abstand))
-                        if Abfrage > 5:
-                            _LOGGER.info('Erhöhe Abfragefrequenz auf 5 Sekunden')
-                            time.sleep(5) 
-                        else:
-                            time.sleep(Abfrage)
-                        while len(abstand) >= 180/Abfrage: #Überwachter Zeitraum 3 Minuten
+            # if time.time() - timestamp > 1800:
+                # _LOGGER.info('restart')
+                # GPIO.cleanup()
+                # init(GPIO_TRIGGER, GPIO_ECHO)
+                # timestamp = time.time()
+            abstand, change = distanz()
+            _LOGGER.debug('Gemessene Entfernung = %scm. Letzte %s Messungen gespeichert.' % (abstand[0],len(abstand)))
+            
+            #sende nur veränderte Messwerte (Cache)
+            if len(abstand) == 1: 
+                send_to_loxone(abstand)
+            elif abstand[0] != abstand[1]:
+                send_to_loxone(abstand)
+            
+            #Wasserstandsänderung.
+            if change > 0.1: #Wasserstandsänderung erkannt, erhöhe abfragefrequenz
+                _LOGGER.info('Wasserstandsänderung von %scm erkannt' % change)
+                publish = client.publish('Zisterne/Wasserentnahme', 1, qos=2, retain=True)
+                _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,1'" % (publish[1]))
+                if abfrage > 5:
+                    _LOGGER.info('Erhöhe Abfragefrequenz auf 5 Sekunden')
+                while change > 0.1:
+                    if abfrage > 5:
+                        time.sleep(5) 
+                        while len(abstand) >= 36: #Überwachter Zeitraum 3 Minuten
                             abstand.pop()
-                        abstand = distanz()
                     else:
-                        _LOGGER.info('Abfragefrequenz auf %s Sekunden zurückgesetzt' % Abfrage)
-                        publish = client.publish('Zisterne/Wasserentnahme', 0, qos=2, retain=True)
-                        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0" % (publish[1]))
+                        time.sleep(abfrage)
+                        while len(abstand) >= 180/abfrage: #Überwachter Zeitraum 3 Minuten
+                            abstand.pop()
+                    abstand, change = distanz()                    
+                    _LOGGER.debug('Gemessene Entfernung = %scm. Letzte %s Messungen gespeichert. Wasserstandsänderung mit %scm erkannt.' % (abstand[0],len(abstand),change))
+                    #sende nur veränderte Messwerte (Cache)
+                    if abstand[0] != abstand[1]:
+                        send_to_loxone(abstand)
                 else:
-                    time.sleep(Abfrage)
-                    while len(abstand) >= 180/Abfrage and len(abstand) >= 5: #Überwachter Zeitraum 3 Minuten, aber mindestens 5 Abfrageabstände
-                        abstand.pop()
-            except SleepInterruptException:
-                _LOGGER.info('wakeup from sleep, stopping process..')
+                    _LOGGER.info('Abfragefrequenz auf %s Sekunden zurückgesetzt' % abfrage)
+                    publish = client.publish('Zisterne/Wasserentnahme', 0, qos=2, retain=True)
+                    _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0'" % (publish[1]))
+            else: #keine Änderung erkannt, warte..      
+                time.sleep(abfrage)
+                while len(abstand) >= 180/abfrage and len(abstand) >= 5: #Überwachter Zeitraum 3 Minuten, aber mindestens 5 abfrageabstände
+                    abstand.pop()
 
-        GPIO.cleanup()
-        _LOGGER.info('... stopped')
+    except SleepInterruptException:
+        _LOGGER.info('wakeup from sleep, and finally..')
     except:
+        _LOGGER.error(traceback.format_exc())
+    
+    finally:
         GPIO.cleanup()
-        _LOGGER.error('cleanup after exception')
-        _LOGGER.error(str(sys.exc_info()))
+        publish = client.publish('Zisterne/Wasserentnahme', 0, qos=2, retain=True)
+        _LOGGER.debug("Publishing msg %s: 'Zisterne/Wasserentnahme,0'" % (publish[1]))
+        publish.wait_for_publish()
+        _LOGGER.info('... stopped')
